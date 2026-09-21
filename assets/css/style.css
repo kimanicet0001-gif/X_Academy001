@@ -1,0 +1,69 @@
+/* assets/css/style.css
+   Compléments à Tailwind (chargé via CDN). Typographie, transitions
+   douces, et styles utiles pour l'impression des pages consultatives. */
+
+html {
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.font-display {
+    font-family: 'Plus Jakarta Sans', ui-sans-serif, sans-serif;
+}
+
+/* Scrollbar discrète */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* Sidebar mobile en superposition quand elle est affichée via JS */
+@media (max-width: 767px) {
+    #sidebar.mobile-open {
+        display: block !important;
+        position: fixed;
+        top: 56px;
+        left: 0;
+        bottom: 0;
+        z-index: 40;
+        box-shadow: 8px 0 24px rgba(15, 23, 42, 0.25);
+    }
+}
+
+/* Transitions douces sur les éléments interactifs */
+a, button {
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Apparition douce du contenu au chargement — en CSS pur, jamais bloquant :
+   même si JS ne s'exécute pas, le contenu part de opacity 1 par défaut
+   (l'animation se joue une fois puis s'arrête, elle ne cache jamais rien). */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+main .max-w-6xl > *,
+main .w-full.max-w-md > * {
+    animation: fadeInUp 0.35s ease-out both;
+}
+
+/* Masque la navigation à l'impression (utile pour les pages de consultation) */
+@media print {
+    header, aside, footer, #sidebar {
+        display: none !important;
+    }
+    main {
+        padding: 0 !important;
+    }
+}

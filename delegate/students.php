@@ -48,11 +48,10 @@ require_once ROOT_PATH . '/includes/header.php';
            class="w-full sm:w-64 border border-slate-300 rounded-lg px-3.5 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none">
 </div>
 
-<div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div class="overflow-x-auto">
+<div class="overflow-x-auto border-t border-slate-200">
         <table class="w-full text-sm" id="delegateStudentsTable">
-            <thead class="bg-slate-50 border-b border-slate-200">
-                <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold">
+            <thead>
+                <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200">
                     <th class="py-3 px-4">#</th>
                     <th class="py-3 px-4">Nom complet</th>
                     <th class="py-3 px-4">Matricule</th>
@@ -84,7 +83,7 @@ require_once ROOT_PATH . '/includes/header.php';
                     </td>
                     <td class="py-2 px-4 text-right">
                         <a href="<?= BASE_URL ?>/delegate/student_edit.php?id=<?= $s['id'] ?>" class="text-indigo-600 hover:text-indigo-700 font-medium">Modifier</a>
-                        <a href="<?= BASE_URL ?>/delegate/student_password.php?id=<?= $s['id'] ?>" class="text-amber-700 hover:text-amber-800 font-medium">Mot de passe</a>
+                        
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -94,7 +93,6 @@ require_once ROOT_PATH . '/includes/header.php';
             </tbody>
         </table>
         </div>
-    </div>
 <?php endif; ?>
 
 <?php require_once ROOT_PATH . '/includes/footer.php'; ?>

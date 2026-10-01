@@ -60,8 +60,8 @@ require_once ROOT_PATH . '/includes/header.php';
 <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden max-w-lg">
     <div class="overflow-x-auto">
     <table class="w-full text-sm">
-        <thead class="bg-slate-50 border-b border-slate-200">
-            <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold"><th class="py-2 px-4">Étudiant</th><th class="py-2 px-4">Statut</th></tr>
+        <thead>
+            <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200"><th class="py-2 px-4">Étudiant</th><th class="py-2 px-4">Statut</th></tr>
         </thead>
         <tbody>
         <?php foreach ($attendance as $a): ?>

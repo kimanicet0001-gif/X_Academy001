@@ -43,11 +43,10 @@ require_once ROOT_PATH . '/includes/header.php';
     </select>
 </form>
 
-<div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-    <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-            <thead class="bg-slate-50 border-b border-slate-200">
-                <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold">
+<div class="overflow-x-auto border-t border-slate-200">
+    <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200">
                     <th class="py-3 px-4">Filière</th>
                     <th class="py-3 px-4">Département</th>
                     <th class="py-3 px-4">Promotions</th>
@@ -84,6 +83,5 @@ require_once ROOT_PATH . '/includes/header.php';
             </tbody>
         </table>
     </div>
-</div>
 
 <?php require_once ROOT_PATH . '/includes/footer.php'; ?>

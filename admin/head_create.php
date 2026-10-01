@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $generatedPassword = $tempPassword;
             logAudit('head_create', "Chef de département créé : $username");
-            setFlash('success', "Chef de département créé. Identifiant : $username — Mot de passe temporaire : $tempPassword");
+            setFlash('success', "Chef de département créé. Identifiant : $username — Mot de passe temporaire : $tempPassword", true);
             redirect('/admin/heads.php');
         }
     }

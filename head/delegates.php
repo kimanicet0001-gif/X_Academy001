@@ -32,11 +32,10 @@ require_once ROOT_PATH . '/includes/header.php';
            class="w-full sm:w-64 border border-slate-300 rounded-lg px-3.5 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none">
 </div>
 
-<div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-    <div class="overflow-x-auto">
+<div class="overflow-x-auto border-t border-slate-200">
     <table class="w-full text-sm" id="delegatesTable">
-        <thead class="bg-slate-50 border-b border-slate-200">
-            <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold">
+        <thead>
+            <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200">
                 <th class="py-3 px-4">Nom complet</th>
                 <th class="py-3 px-4">Identifiant</th>
                 <th class="py-3 px-4">Promotions gérées</th>
@@ -73,7 +72,6 @@ require_once ROOT_PATH . '/includes/header.php';
         <?php endif; ?>
         </tbody>
     </table>
-</div>
 </div>
 
 <?php require_once ROOT_PATH . '/includes/footer.php'; ?>

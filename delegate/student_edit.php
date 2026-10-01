@@ -77,7 +77,6 @@ require_once ROOT_PATH . '/includes/header.php';
             <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-5 py-2.5 rounded-lg shadow-sm transition">
                 Enregistrer
             </button>
-            <a href="<?= BASE_URL ?>/delegate/student_password.php?id=<?= $id ?>" class="text-amber-700 hover:text-amber-800 font-medium text-sm self-center">Réinitialiser le mot de passe</a>
             <a href="<?= BASE_URL ?>/delegate/students.php" class="text-slate-500 hover:text-slate-700 self-center text-sm transition">Annuler</a>
         </div>
     </form>

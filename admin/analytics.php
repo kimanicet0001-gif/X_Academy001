@@ -78,11 +78,10 @@ require_once ROOT_PATH . '/includes/header.php';
         </div>
     </div>
 
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div class="overflow-x-auto">
+    <div class="overflow-x-auto border-t border-slate-200">
         <table class="w-full text-sm">
-            <thead class="bg-slate-50 border-b border-slate-200">
-                <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold">
+            <thead>
+                <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200">
                     <th class="py-3 px-4">Département</th>
                     <th class="py-3 px-4">Heures prévues</th>
                     <th class="py-3 px-4">Heures prestées</th>
@@ -108,7 +107,6 @@ require_once ROOT_PATH . '/includes/header.php';
             </tbody>
         </table>
         </div>
-    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>

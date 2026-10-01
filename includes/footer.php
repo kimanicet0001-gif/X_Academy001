@@ -14,9 +14,11 @@ $user = currentUser();
     </main>
 <?php endif; ?>
 
+<?php if ($user): ?>
 <footer class="text-center text-xs text-slate-400 py-6 border-t border-slate-200 mt-auto">
     &copy; <?= date('Y') ?> <?= h(APP_NAME) ?> — Journal académique numérique
 </footer>
+<?php endif; ?>
 
 <script>window.APP_BASE_URL = <?= json_encode(BASE_URL) ?>;</script>
 <script src="<?= BASE_URL ?>/assets/js/app.js"></script>

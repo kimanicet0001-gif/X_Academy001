@@ -101,7 +101,7 @@
         var AUTO_DISMISS_DELAY = 4500;
         var TRANSITION_DURATION = 400;
 
-        var flashes = document.querySelectorAll('.js-flash');
+        var flashes = document.querySelectorAll('.js-flash:not(.js-flash-persist)');
         flashes.forEach(function (el) {
             setTimeout(function () {
                 dismissFlash(el, TRANSITION_DURATION);

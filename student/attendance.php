@@ -66,8 +66,8 @@ require_once ROOT_PATH . '/includes/header.php';
         <?php else: ?>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
-                    <thead class="bg-slate-50 border-b border-slate-200">
-                        <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold">
+                    <thead>
+                        <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200">
                             <th class="py-2 px-3">Date</th>
                             <th class="py-2 px-3">Cours</th>
                             <th class="py-2 px-3">Matière</th>

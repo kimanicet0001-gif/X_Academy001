@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ins->execute([$promotion['id'], $fullName, $matricule, $username, $hash]);
         logAudit('student_create', "Étudiant créé : $fullName ($matricule)");
 
-        setFlash('success', "Étudiant ajouté. Identifiant : $username — Mot de passe temporaire : $tempPassword");
+        setFlash('success', "Étudiant ajouté. Identifiant : $username — Mot de passe temporaire : $tempPassword", true);
         redirect('/delegate/students.php');
     }
 }

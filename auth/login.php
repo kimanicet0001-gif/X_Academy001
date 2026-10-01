@@ -82,14 +82,15 @@ $pageTitle = 'Connexion';
 require_once ROOT_PATH . '/includes/header.php';
 ?>
 
-<div class="bg-white rounded-2xl shadow-xl shadow-slate-200/60 p-8">
-    <div class="text-center mb-6">
-        <div class="w-14 h-14 mx-auto rounded-2xl bg-indigo-600 flex items-center justify-center mb-3 shadow-lg shadow-indigo-200">
-            <?= icon('academic-cap', 'w-7 h-7 text-white') ?>
-        </div>
-        <h1 class="text-xl font-display font-bold text-slate-900"><?= h(APP_NAME) ?></h1>
-        <p class="text-slate-500 text-sm">Journal académique numérique</p>
-    </div>
+<div class="text-center mb-7">
+    <img src="<?= BASE_URL ?>/assets/images/logo.png" alt="<?= h(APP_NAME) ?>"
+         class="w-16 h-16 mx-auto rounded-2xl object-cover mb-4 shadow-lg shadow-black/30">
+    <h1 class="text-3xl font-display font-semibold text-white tracking-tight"><?= h(APP_NAME) ?></h1>
+    <p class="text-indigo-300 text-xs uppercase tracking-[0.2em] mt-1.5">Apprendre · Suivre · Réussir</p>
+</div>
+
+<div class="bg-white rounded-2xl shadow-xl shadow-black/20 p-8">
+    <h2 class="text-sm font-semibold text-slate-800 mb-5">Connexion à votre espace</h2>
 
     <?php if ($error): ?>
         <div class="bg-red-50 text-red-700 border border-red-200 rounded-xl px-4 py-3 mb-4 text-sm">
@@ -115,5 +116,9 @@ require_once ROOT_PATH . '/includes/header.php';
         </button>
     </form>
 </div>
+<p class="text-center font-display italic text-indigo-200/80 text-sm mt-7 px-4 leading-relaxed">
+    « Transformer chaque donnée académique en une vision plus claire de l'avenir. »
+</p>
+<p class="text-center text-indigo-300/60 text-xs mt-4">&copy; <?= date('Y') ?> <?= h(APP_NAME) ?></p>
 
 <?php require_once ROOT_PATH . '/includes/footer.php'; ?>

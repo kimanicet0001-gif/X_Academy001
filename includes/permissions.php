@@ -6,10 +6,11 @@
  * se fait via auth/auth.php, inclus en tête de chaque page protégée.
  */
 
-const ROLE_ADMIN    = 'admin';
-const ROLE_HEAD     = 'head';
-const ROLE_DELEGATE = 'delegate';
-const ROLE_STUDENT  = 'student';
+const ROLE_ADMIN     = 'admin';
+const ROLE_HEAD      = 'head';
+const ROLE_DELEGATE  = 'delegate';
+const ROLE_STUDENT   = 'student';
+const ROLE_PROFESSOR = 'professor';
 
 /**
  * Retourne le rôle de l'utilisateur actuellement connecté, ou null.
@@ -44,8 +45,9 @@ function roleLabel(string $role): string
         ROLE_ADMIN    => 'Administrateur',
         ROLE_HEAD     => 'Chef de Département',
         ROLE_DELEGATE => 'Délégué',
-        ROLE_STUDENT  => 'Étudiant',
-        default       => 'Utilisateur',
+        ROLE_STUDENT   => 'Étudiant',
+        ROLE_PROFESSOR => 'Professeur',
+        default        => 'Utilisateur',
     };
 }
 
@@ -59,8 +61,9 @@ function dashboardPath(string $role): string
         ROLE_ADMIN    => '/admin/dashboard.php',
         ROLE_HEAD     => '/head/dashboard.php',
         ROLE_DELEGATE => '/delegate/dashboard.php',
-        ROLE_STUDENT  => '/student/dashboard.php',
-        default       => '/auth/login.php',
+        ROLE_STUDENT   => '/student/dashboard.php',
+        ROLE_PROFESSOR => '/professor/dashboard.php',
+        default        => '/auth/login.php',
     };
 }
 

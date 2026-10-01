@@ -5,16 +5,14 @@
  */
 $user = currentUser();
 ?>
-<header class="bg-slate-900 text-white sticky top-0 z-30">
+<header class="bg-indigo-950 text-white sticky top-0 z-30">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
         <div class="flex items-center gap-3">
             <button id="sidebarToggle" class="md:hidden text-slate-300 hover:text-white" aria-label="Menu">
                 <?= icon('menu', 'w-6 h-6') ?>
             </button>
             <a href="<?= dashboardUrlForRole($user['role']) ?>" class="flex items-center gap-2.5">
-                <span class="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center">
-                    <?= icon('academic-cap', 'w-5 h-5 text-white') ?>
-                </span>
+                <img src="<?= BASE_URL ?>/assets/images/logo-64.png" alt="" class="w-8 h-8 rounded-lg object-cover">
                 <span class="font-display font-bold text-lg tracking-tight hidden sm:inline"><?= h(APP_NAME) ?></span>
             </a>
             <form action="<?= BASE_URL ?>/search.php" method="get" class="hidden md:block relative">
@@ -30,9 +28,13 @@ $user = currentUser();
                 <span class="text-white font-medium"><?= h($user['full_name']) ?></span>
                 <span class="text-slate-400 text-xs"><?= h(roleLabel($user['role'])) ?></span>
             </div>
-            <?php if ($user['role'] === ROLE_STUDENT): ?>
-                <?php $unread = getUnreadNotificationCount((int) $user['id']); ?>
-                <a href="<?= BASE_URL ?>/student/notifications.php" title="Notifications"
+            <?php if (in_array($user['role'], [ROLE_STUDENT, ROLE_PROFESSOR], true)): ?>
+                <?php
+                    $isProf = $user['role'] === ROLE_PROFESSOR;
+                    $unread = getUnreadNotificationCount((int) $user['id'], $isProf ? 'professor' : 'student');
+                    $notifUrl = $isProf ? '/professor/notifications.php' : '/student/notifications.php';
+                ?>
+                <a href="<?= BASE_URL . $notifUrl ?>" title="Notifications"
                    class="relative w-9 h-9 flex items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition">
                     <?= icon('bell', 'w-5 h-5') ?>
                     <?php if ($unread > 0): ?>

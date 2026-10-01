@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             logAudit('delegate_create', "Délégué créé : \$username");
             logAudit('delegate_create', "Délégué créé : $username");
-            setFlash('success', "Délégué créé. Identifiant : $username — Mot de passe temporaire : $tempPassword");
+            setFlash('success', "Délégué créé. Identifiant : $username — Mot de passe temporaire : $tempPassword", true);
             redirect('/head/delegates.php');
         }
     }

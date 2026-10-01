@@ -94,8 +94,8 @@ require_once ROOT_PATH . '/includes/header.php';
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
-                <thead class="bg-slate-50 border-b border-slate-200">
-                    <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold">
+                <thead>
+                    <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200">
                         <th class="py-3 px-4">Promotion</th>
                         <th class="py-3 px-4">Heures prévues</th>
                         <th class="py-3 px-4">Heures prestées</th>
@@ -231,8 +231,8 @@ require_once ROOT_PATH . '/includes/header.php';
 <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="overflow-x-auto">
     <table class="w-full text-sm" id="reportsTable">
-        <thead class="bg-slate-50 border-b border-slate-200">
-            <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold">
+        <thead>
+            <tr class="text-left text-slate-500 text-xs uppercase tracking-wide font-semibold border-b border-slate-200">
                 <th class="py-3 px-4">Cours</th>
                 <th class="py-3 px-4">Promotion</th>
                 <th class="py-3 px-4">Séances réalisées</th>

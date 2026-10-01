@@ -778,13 +778,27 @@ function notifyPromotion(int $promotionId, string $type, string $message, ?strin
 }
 
 /**
- * Nombre de notifications non lues pour un étudiant (badge dans la navbar).
+ * Nombre de notifications non lues pour un étudiant OU un professeur
+ * (badge dans la navbar). $recipientType vaut 'student' (défaut) ou 'professor'.
  */
-function getUnreadNotificationCount(int $studentId): int
+function getUnreadNotificationCount(int $recipientId, string $recipientType = 'student'): int
 {
-    $stmt = getDB()->prepare('SELECT COUNT(*) FROM notifications WHERE student_id = ? AND is_read = 0');
-    $stmt->execute([$studentId]);
+    $column = $recipientType === 'professor' ? 'user_id' : 'student_id';
+    $stmt = getDB()->prepare("SELECT COUNT(*) FROM notifications WHERE $column = ? AND is_read = 0");
+    $stmt->execute([$recipientId]);
     return (int) $stmt->fetchColumn();
+}
+
+/**
+ * Crée une notification adressée à un utilisateur (professeur, chef...),
+ * par opposition à notifyPromotion() qui vise les étudiants.
+ */
+function notifyUser(int $userId, string $type, string $message, ?string $link = null): void
+{
+    $stmt = getDB()->prepare(
+        'INSERT INTO notifications (user_id, type, message, link) VALUES (?, ?, ?, ?)'
+    );
+    $stmt->execute([$userId, $type, $message, $link]);
 }
 
 /**
@@ -862,5 +876,700 @@ function getFilieres(int $departmentId, bool $activeOnly = true): array
     $stmt = getDB()->prepare($sql);
     $stmt->execute([$departmentId]);
     return $stmt->fetchAll();
+}
+
+// =====================================================================
+// MODULE PROFESSEUR & NOTES
+// Chaîne de calcul : NOTE -> GPA -> POINTS PONDÉRÉS -> UE -> SEMESTRE
+// -> ANNÉE -> CYCLE. Aucune de ces valeurs n'est jamais saisie à la main :
+// seule la note (score) l'est, tout le reste est dérivé ici.
+// Les résultats officiels (UE, semestre, année, cycle) ne comptent que les
+// notes soumises ou verrouillées : jamais les brouillons.
+// =====================================================================
+
+/**
+ * GPA à partir d'une note sur 100. Formule de référence : note / 25,
+ * plafonné à 4.00 (une note de 100 donne exactement 4.00).
+ */
+function calculateGPA(float $score): float
+{
+    return round(min($score / 25, 4.00), 2);
+}
+
+/**
+ * Points pondérés = GPA x crédits du cours.
+ */
+function calculateWeightedPoints(float $score, float $credits): float
+{
+    return round(calculateGPA($score) * $credits, 2);
+}
+
+/**
+ * Lettre correspondant à une note, selon le barème actif (table
+ * grading_scales, configurable depuis l'admin). Retourne 'N/A' si aucune
+ * tranche ne correspond (barème incomplet) plutôt que de deviner.
+ */
+function calculateGrade(float $score): string
+{
+    $stmt = getDB()->prepare(
+        "SELECT grade FROM grading_scales
+         WHERE active = 1 AND ? BETWEEN min_score AND max_score
+         ORDER BY min_score DESC LIMIT 1"
+    );
+    $stmt->execute([$score]);
+    $grade = $stmt->fetchColumn();
+    return $grade !== false ? $grade : 'N/A';
+}
+
+/**
+ * Seuil de validation d'une UE (note moyenne à partir de laquelle une UE
+ * est considérée Validée). Configurable dans admin/settings.php.
+ */
+function getUeValidationThreshold(): float
+{
+    $settings = getUniversitySettings();
+    return isset($settings['ue_validation_threshold']) ? (float) $settings['ue_validation_threshold'] : 60.0;
+}
+
+/**
+ * Recalcule et enregistre les champs dérivés (gpa, weighted_points, grade)
+ * d'une note à partir de son score. À appeler à chaque création/modification
+ * d'un student_grades.score, en DRAFT comme en correction post-verrouillage.
+ */
+function refreshGradeDerivedFields(int $gradeId, float $score): void
+{
+    $stmt = getDB()->prepare('SELECT c.credits FROM student_grades sg JOIN courses c ON c.id = sg.course_id WHERE sg.id = ?');
+    $stmt->execute([$gradeId]);
+    $credits = (float) $stmt->fetchColumn();
+
+    $upd = getDB()->prepare('UPDATE student_grades SET gpa = ?, weighted_points = ?, grade = ? WHERE id = ?');
+    $upd->execute([
+        calculateGPA($score),
+        calculateWeightedPoints($score, $credits),
+        calculateGrade($score),
+        $gradeId,
+    ]);
+}
+
+/**
+ * Vérifie qu'un professeur est bien affecté (activement) à un cours donné.
+ */
+function isProfessorAssignedToCourse(int $professorId, int $courseId): bool
+{
+    $stmt = getDB()->prepare(
+        "SELECT COUNT(*) FROM teaching_assignments WHERE professor_id = ? AND course_id = ? AND status = 'active'"
+    );
+    $stmt->execute([$professorId, $courseId]);
+    return $stmt->fetchColumn() > 0;
+}
+
+/**
+ * Liste des enseignements actifs affectés à un professeur, avec le
+ * contexte complet (cours, promotion, filière, département) déduit par
+ * jointure — jamais stocké en double dans teaching_assignments.
+ */
+function getProfessorAssignments(int $professorId): array
+{
+    $stmt = getDB()->prepare(
+        "SELECT ta.id AS assignment_id, c.id AS course_id, c.name AS course_name, c.credits,
+                c.semester, p.id AS promotion_id, p.name AS promotion_name, p.group_name,
+                p.academic_year, f.name AS filiere_name, d.name AS department_name,
+                (SELECT COUNT(*) FROM students st WHERE st.promotion_id = p.id AND st.status = 'active') AS student_count,
+                (SELECT COUNT(*) FROM student_grades sg WHERE sg.course_id = c.id) AS graded_count
+         FROM teaching_assignments ta
+         JOIN courses c ON c.id = ta.course_id
+         JOIN promotions p ON p.id = c.promotion_id
+         LEFT JOIN filieres f ON f.id = p.filiere_id
+         JOIN departments d ON d.id = p.department_id
+         WHERE ta.professor_id = ? AND ta.status = 'active'
+         ORDER BY p.academic_year DESC, c.name"
+    );
+    $stmt->execute([$professorId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Étudiants actifs de la promotion d'un cours, avec leur note existante
+ * pour ce cours si elle existe déjà (jointure LEFT).
+ */
+function getCourseStudentsWithGrades(int $courseId): array
+{
+    $stmt = getDB()->prepare(
+        "SELECT st.id AS student_id, st.full_name, st.matricule, sg.id AS grade_id,
+                sg.score, sg.gpa, sg.grade, sg.status AS grade_status
+         FROM courses c
+         JOIN students st ON st.promotion_id = c.promotion_id AND st.status = 'active'
+         LEFT JOIN student_grades sg ON sg.student_id = st.id AND sg.course_id = c.id
+         WHERE c.id = ?
+         ORDER BY st.full_name"
+    );
+    $stmt->execute([$courseId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Moyenne et GPA d'une UE pour un étudiant, pondérés par les crédits de
+ * chaque cours (ECUE) de cette UE. Retourne null si aucune note saisie.
+ */
+function calculateUEResult(int $studentId, int $ueId): ?array
+{
+    $stmt = getDB()->prepare(
+        "SELECT sg.score, sg.gpa, c.credits, c.name AS course_name
+         FROM student_grades sg JOIN courses c ON c.id = sg.course_id
+         WHERE sg.student_id = ? AND c.ue_id = ? AND sg.status <> 'draft'"
+    );
+    $stmt->execute([$studentId, $ueId]);
+    $rows = $stmt->fetchAll();
+
+    if (empty($rows)) {
+        return null;
+    }
+
+    $totalCredits = array_sum(array_column($rows, 'credits'));
+    if ($totalCredits <= 0) {
+        return null;
+    }
+
+    $weightedScore = 0.0;
+    $weightedGpa = 0.0;
+    foreach ($rows as $r) {
+        $weightedScore += $r['score'] * $r['credits'];
+        $weightedGpa   += $r['gpa'] * $r['credits'];
+    }
+
+    $mean = round($weightedScore / $totalCredits, 2);
+    $threshold = getUeValidationThreshold();
+
+    return [
+        'credits'  => $totalCredits,
+        'mean'     => $mean,
+        'gpa'      => round($weightedGpa / $totalCredits, 2),
+        'validated' => $mean >= $threshold,
+        'courses'  => $rows,
+    ];
+}
+
+/**
+ * Résultat complet d'un semestre pour un étudiant : crédits, points
+ * pondérés, moyenne, GPA, et détail UE par UE (validée / non validée).
+ * GPA semestre = somme des points pondérés / somme des crédits — jamais
+ * une simple moyenne des GPA des cours (fausse si les crédits diffèrent).
+ */
+function calculateSemesterResult(int $studentId, string $academicYear, string $semester): array
+{
+    $stmt = getDB()->prepare(
+        "SELECT sg.score, sg.gpa, sg.weighted_points, c.credits, c.ue_id, u.name AS ue_name
+         FROM student_grades sg
+         JOIN courses c ON c.id = sg.course_id
+         JOIN promotions p ON p.id = c.promotion_id
+         LEFT JOIN ues u ON u.id = c.ue_id
+         WHERE sg.student_id = ? AND p.academic_year = ? AND p.semester = ? AND sg.status <> 'draft'"
+    );
+    $stmt->execute([$studentId, $academicYear, $semester]);
+    $rows = $stmt->fetchAll();
+
+    $totalCredits = array_sum(array_column($rows, 'credits'));
+    $totalWeighted = array_sum(array_column($rows, 'weighted_points'));
+
+    $ueIds = array_unique(array_filter(array_column($rows, 'ue_id')));
+    $ueResults = [];
+    foreach ($ueIds as $ueId) {
+        $ueResults[] = array_merge(['ue_id' => $ueId], calculateUEResult($studentId, (int) $ueId) ?? []);
+    }
+    $validatedCount = count(array_filter($ueResults, fn($u) => !empty($u['validated'])));
+
+    return [
+        'academic_year'   => $academicYear,
+        'semester'        => $semester,
+        'credits'         => $totalCredits,
+        'weighted_points' => round($totalWeighted, 2),
+        'mean'            => $totalCredits > 0 ? round(array_sum(array_map(fn($r) => $r['score'] * $r['credits'], $rows)) / $totalCredits, 2) : 0.0,
+        'gpa'             => $totalCredits > 0 ? round($totalWeighted / $totalCredits, 2) : 0.0,
+        'ue_results'      => $ueResults,
+        'ue_validated'    => $validatedCount,
+        'ue_total'        => count($ueResults),
+    ];
+}
+
+/**
+ * Résultat annuel : cumul des deux semestres (S1 + S2) d'une même année
+ * académique. GPA annuel = total des points pondérés / total des crédits.
+ */
+function calculateAnnualResult(int $studentId, string $academicYear): array
+{
+    $s1 = calculateSemesterResult($studentId, $academicYear, 'S1');
+    $s2 = calculateSemesterResult($studentId, $academicYear, 'S2');
+
+    $totalCredits = $s1['credits'] + $s2['credits'];
+    $totalWeighted = $s1['weighted_points'] + $s2['weighted_points'];
+
+    return [
+        'academic_year'   => $academicYear,
+        'credits'         => $totalCredits,
+        'weighted_points' => round($totalWeighted, 2),
+        'gpa'             => $totalCredits > 0 ? round($totalWeighted / $totalCredits, 2) : 0.0,
+        'mean_percent'    => $totalCredits > 0 ? round(($totalWeighted / $totalCredits) * 25, 2) : 0.0,
+        'semesters'       => ['S1' => $s1, 'S2' => $s2],
+    ];
+}
+
+/**
+ * Cumul de cycle : moyenne pondérée par les crédits de TOUTES les années
+ * académiques où l'étudiant a des notes (déduites de ses student_grades,
+ * peu importe les changements de promotion au fil des années).
+ */
+function calculateCumulativeResult(int $studentId): array
+{
+    $stmt = getDB()->prepare(
+        "SELECT DISTINCT p.academic_year
+         FROM student_grades sg
+         JOIN courses c ON c.id = sg.course_id
+         JOIN promotions p ON p.id = c.promotion_id
+         WHERE sg.student_id = ? AND sg.status <> 'draft'
+         ORDER BY p.academic_year"
+    );
+    $stmt->execute([$studentId]);
+    $years = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $totalCredits = 0.0;
+    $totalWeighted = 0.0;
+    $yearResults = [];
+    foreach ($years as $year) {
+        $annual = calculateAnnualResult($studentId, $year);
+        $yearResults[] = $annual;
+        $totalCredits += $annual['credits'];
+        $totalWeighted += $annual['weighted_points'];
+    }
+
+    return [
+        'credits'         => $totalCredits,
+        'weighted_points' => round($totalWeighted, 2),
+        'gpa'             => $totalCredits > 0 ? round($totalWeighted / $totalCredits, 2) : 0.0,
+        'mean_percent'    => $totalCredits > 0 ? round(($totalWeighted / $totalCredits) * 25, 2) : 0.0,
+        'years'           => $yearResults,
+    ];
+}
+
+/**
+ * Vérifie qu'un utilisateur a le droit d'agir sur une note donnée
+ * (consultation ou modification selon le rôle). Ne remplace pas
+ * requireRole() : à utiliser en complément pour les contrôles fins
+ * (ex: "ce chef a-t-il le droit de modifier CETTE note précise ?").
+ */
+function validateGradeAccess(int $userId, int $gradeId): bool
+{
+    $stmt = getDB()->prepare(
+        "SELECT sg.student_id, c.id AS course_id, p.department_id
+         FROM student_grades sg
+         JOIN courses c ON c.id = sg.course_id
+         JOIN promotions p ON p.id = c.promotion_id
+         WHERE sg.id = ?"
+    );
+    $stmt->execute([$gradeId]);
+    $grade = $stmt->fetch();
+    if (!$grade) {
+        return false;
+    }
+
+    $user = currentUser();
+    return match ($user['role'] ?? null) {
+        ROLE_ADMIN     => true,
+        ROLE_HEAD      => (int) $grade['department_id'] === (int) ($user['department_id'] ?? 0),
+        ROLE_PROFESSOR => isProfessorAssignedToCourse((int) $userId, (int) $grade['course_id']),
+        ROLE_STUDENT   => (int) $grade['student_id'] === (int) $userId,
+        default        => false,
+    };
+}
+
+/**
+ * Soumission des notes d'un cours par son professeur : fait passer
+ * toutes les notes DRAFT de ce cours en SUBMITTED (verrouillage pour le
+ * professeur — seul un Chef de Département pourra ensuite les corriger).
+ * Retourne ['success' => bool, 'count' => int, 'error' => ?string].
+ */
+function submitGrades(int $professorId, int $courseId): array
+{
+    if (!isProfessorAssignedToCourse($professorId, $courseId)) {
+        return ['success' => false, 'count' => 0, 'error' => "Vous n'êtes pas affecté à ce cours."];
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM student_grades WHERE course_id = ? AND status = 'draft'");
+    $stmt->execute([$courseId]);
+    $count = (int) $stmt->fetchColumn();
+
+    if ($count === 0) {
+        return ['success' => false, 'count' => 0, 'error' => 'Aucune note en brouillon à soumettre pour ce cours.'];
+    }
+
+    $upd = $db->prepare(
+        "UPDATE student_grades SET status = 'submitted', submitted_by = ?, submitted_at = NOW()
+         WHERE course_id = ? AND status = 'draft'"
+    );
+    $upd->execute([$professorId, $courseId]);
+
+    $cn = $db->prepare('SELECT name FROM courses WHERE id = ?');
+    $cn->execute([$courseId]);
+    $courseName = (string) $cn->fetchColumn();
+    $rows = $db->prepare("SELECT student_id, score FROM student_grades WHERE course_id = ? AND status = 'submitted' AND submitted_by = ?");
+    $rows->execute([$courseId, $professorId]);
+    foreach ($rows->fetchAll() as $r) {
+        notifyStudentOfGrade((int) $r['student_id'], $courseName, (float) $r['score']);
+    }
+
+    logAudit('grades_submit', "Notes soumises pour le cours #$courseId ($count note(s))");
+    return ['success' => true, 'count' => $count, 'error' => null];
+}
+
+/**
+ * Enregistre (crée ou met à jour) une note en BROUILLON pour un étudiant
+ * dans un cours, puis recalcule GPA / points pondérés / lettre.
+ * Refuse toute modification si la note est déjà soumise ou verrouillée.
+ * Retourne true si la note a été enregistrée.
+ */
+function saveDraftGrade(int $studentId, int $courseId, float $score): bool
+{
+    if ($score < 0 || $score > 100) {
+        return false;
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT id, status FROM student_grades WHERE student_id = ? AND course_id = ?');
+    $stmt->execute([$studentId, $courseId]);
+    $existing = $stmt->fetch();
+
+    if ($existing) {
+        if ($existing['status'] !== 'draft') {
+            return false;
+        }
+        $db->prepare('UPDATE student_grades SET score = ? WHERE id = ?')->execute([$score, $existing['id']]);
+        $gradeId = (int) $existing['id'];
+    } else {
+        $db->prepare("INSERT INTO student_grades (student_id, course_id, score, status) VALUES (?, ?, ?, 'draft')")
+           ->execute([$studentId, $courseId, $score]);
+        $gradeId = (int) $db->lastInsertId();
+    }
+
+    refreshGradeDerivedFields($gradeId, $score);
+    return true;
+}
+
+/**
+ * Récupère, pour un cours donné, les étudiants inscrits indexés par
+ * matricule en majuscules — utilisé par les deux parseurs d'import
+ * (CSV et PDF) pour éviter de dupliquer la requête et la logique.
+ */
+function getCourseEnrolledByMatricule(int $courseId): array
+{
+    $stmt = getDB()->prepare(
+        "SELECT st.id, st.full_name, st.matricule, st.status AS student_status, sg.status AS grade_status
+         FROM courses c
+         JOIN students st ON st.promotion_id = c.promotion_id
+         LEFT JOIN student_grades sg ON sg.student_id = st.id AND sg.course_id = c.id
+         WHERE c.id = ?"
+    );
+    $stmt->execute([$courseId]);
+    $enrolled = [];
+    foreach ($stmt->fetchAll() as $row) {
+        if ($row['matricule'] !== null && $row['matricule'] !== '') {
+            $enrolled[strtoupper($row['matricule'])] = $row;
+        }
+    }
+    return $enrolled;
+}
+
+/**
+ * Valide un couple (matricule, note) candidat face aux étudiants inscrits
+ * dans le cours. Renvoie une ligne de résultat au même format pour le
+ * CSV et le PDF, afin que la prévisualisation et l'import restent identiques
+ * quelle que soit la source du fichier.
+ */
+function evaluateGradeCandidate(string $matricule, string $rawScore, array $enrolled, array &$seen, PDOStatement $lookupStmt): array
+{
+    $entry = ['matricule' => $matricule, 'name' => '', 'score' => $rawScore,
+              'student_id' => null, 'ok' => false, 'message' => ''];
+    $key = strtoupper($matricule);
+
+    if ($matricule === '') {
+        $entry['message'] = 'Matricule manquant';
+    } elseif (isset($seen[$key])) {
+        $entry['message'] = 'Matricule en double dans le fichier';
+    } elseif (!is_numeric($rawScore)) {
+        $entry['message'] = 'Note non numérique';
+    } elseif ((float) $rawScore < 0 || (float) $rawScore > 100) {
+        $entry['message'] = 'Note hors limites (0 à 100)';
+    } elseif (!isset($enrolled[$key])) {
+        $lookupStmt->execute([$matricule]);
+        $entry['message'] = $lookupStmt->fetchColumn() > 0
+            ? 'Étudiant hors de la promotion de ce cours'
+            : 'Matricule inconnu';
+    } elseif ($enrolled[$key]['student_status'] !== 'active') {
+        $entry['name'] = $enrolled[$key]['full_name'];
+        $entry['message'] = 'Étudiant inactif';
+    } elseif ($enrolled[$key]['grade_status'] !== null && $enrolled[$key]['grade_status'] !== 'draft') {
+        $entry['name'] = $enrolled[$key]['full_name'];
+        $entry['message'] = 'Note déjà soumise (non modifiable)';
+    } else {
+        $entry['name'] = $enrolled[$key]['full_name'];
+        $entry['student_id'] = (int) $enrolled[$key]['id'];
+        $entry['score'] = round((float) $rawScore, 2);
+        $entry['ok'] = true;
+        $entry['message'] = 'OK';
+    }
+
+    $seen[$key] = true;
+    return $entry;
+}
+
+/**
+ * Extraction de texte "maison" d'un PDF, sans bibliothèque externe
+ * (aucun accès réseau disponible sur ce serveur pour installer une
+ * dépendance). Fonctionne pour des PDF texte (export Word/Excel/LibreOffice,
+ * tableau généré numériquement) — PAS pour un PDF scanné/image, qui
+ * demanderait de l'OCR, indisponible ici.
+ * Chaque ligne du PDF devient une ligne de la chaîne retournée.
+ */
+function extractTextFromPdf(string $filePath): string
+{
+    $raw = file_get_contents($filePath);
+    if ($raw === false) {
+        return '';
+    }
+
+    $text = '';
+    // 1. Repère tous les flux (stream ... endstream) et les décompresse
+    //    si nécessaire (FlateDecode est le filtre quasi systématique).
+    if (preg_match_all('/stream\r?\n(.*?)endstream/s', $raw, $streams)) {
+        foreach ($streams[1] as $stream) {
+            $content = @gzuncompress($stream);
+            if ($content === false) {
+                $content = $stream; // flux déjà en clair (rare mais possible)
+            }
+            // 2. Dans un flux de contenu PDF, le texte est porté par les
+            //    opérateurs Tj (chaîne unique) et TJ (tableau de chaînes),
+            //    à l'intérieur de blocs BT...ET. Td/TD/T* marquent un
+            //    changement de ligne dans la mise en page du PDF.
+            if (preg_match_all('/BT(.*?)ET/s', $content, $blocks)) {
+                foreach ($blocks[1] as $block) {
+                    $line = '';
+                    if (preg_match_all('/\((?:[^()\\\\]|\\\\.)*\)\s*Tj|\[(?:[^\[\]]*)\]\s*TJ|T[dD*]/', $block, $ops)) {
+                        foreach ($ops[0] as $op) {
+                            if (str_ends_with($op, 'Tj')) {
+                                $line .= pdfDecodeLiteralString(substr($op, 0, -3));
+                            } elseif (str_ends_with($op, 'TJ')) {
+                                preg_match_all('/\((?:[^()\\\\]|\\\\.)*\)/', $op, $parts);
+                                foreach ($parts[0] as $p) {
+                                    $line .= pdfDecodeLiteralString($p);
+                                }
+                            } else {
+                                $line .= "\n"; // Td / TD / T* : nouvelle ligne
+                            }
+                        }
+                    }
+                    $text .= $line . "\n";
+                }
+            }
+        }
+    }
+
+    return $text;
+}
+
+/**
+ * Décode une chaîne littérale PDF "(...)" : retire les parenthèses et
+ * interprète les échappements \(, \), \\, \n, \r, \t.
+ */
+function pdfDecodeLiteralString(string $s): string
+{
+    $s = trim($s);
+    if ($s === '' || $s[0] !== '(') {
+        return '';
+    }
+    $s = substr($s, 1, -1);
+    return str_replace(
+        ['\\(', '\\)', '\\\\', '\\n', '\\r', '\\t'],
+        ['(', ')', '\\', "\n", "\r", "\t"],
+        $s
+    );
+}
+
+/**
+ * Analyse un fichier CSV de notes (colonnes : Matricule ; Note) pour un
+ * cours donné, SANS rien enregistrer. Chaque ligne est vérifiée :
+ * matricule connu, étudiant bien inscrit dans la promotion du cours,
+ * note numérique entre 0 et 100, pas de doublon dans le fichier, note
+ * pas déjà soumise. Retourne la liste des lignes avec leur statut.
+ */
+function parseGradesCsv(string $filePath, int $courseId): array
+{
+    $handle = fopen($filePath, 'r');
+    if (!$handle) {
+        return [];
+    }
+
+    // Détection du séparateur sur la première ligne (; ou ,)
+    $firstLine = fgets($handle);
+    rewind($handle);
+    $delimiter = substr_count((string) $firstLine, ';') >= substr_count((string) $firstLine, ',') ? ';' : ',';
+
+    $enrolled = getCourseEnrolledByMatricule($courseId);
+    $lookup = getDB()->prepare('SELECT COUNT(*) FROM students WHERE matricule = ?');
+    $rows = [];
+    $seen = [];
+    $lineNo = 0;
+
+    while (($data = fgetcsv($handle, 1000, $delimiter)) !== false) {
+        $lineNo++;
+        if (count($data) < 2 || trim(implode('', $data)) === '') {
+            continue;
+        }
+        $data[0] = preg_replace('/^\xEF\xBB\xBF/', '', $data[0]); // BOM Excel
+        $matricule = trim($data[0]);
+        $rawScore  = trim(str_replace(',', '.', $data[1]));
+
+        // En-tête éventuel : la note n'est pas numérique sur la 1re ligne
+        if ($lineNo === 1 && !is_numeric($rawScore)) {
+            continue;
+        }
+
+        $rows[] = array_merge(['line' => $lineNo], evaluateGradeCandidate($matricule, $rawScore, $enrolled, $seen, $lookup));
+    }
+    fclose($handle);
+    return $rows;
+}
+
+/**
+ * Analyse un PDF de notes pour un cours donné (matricule + note par
+ * ligne, dans n'importe quel ordre sur la ligne), SANS rien enregistrer.
+ * Même format de retour que parseGradesCsv() pour une prévisualisation
+ * identique quelle que soit la source.
+ */
+function parseGradesPdf(string $filePath, int $courseId): array
+{
+    $text = extractTextFromPdf($filePath);
+    $lines = array_filter(array_map('trim', explode("\n", $text)), fn($l) => $l !== '');
+    if (empty($lines)) {
+        return [];
+    }
+
+    $enrolled = getCourseEnrolledByMatricule($courseId);
+    $lookup = getDB()->prepare('SELECT COUNT(*) FROM students WHERE matricule = ?');
+    $seen = [];
+    $rows = [];
+    $lineNo = 0;
+
+    foreach ($lines as $line) {
+        $lineNo++;
+        $tokens = preg_split('/\s+/', $line);
+        $matricule = null;
+        $score = null;
+
+        foreach ($tokens as $tok) {
+            if ($matricule === null && preg_match('/^[A-Z0-9\-\/]{4,}$/i', $tok) && preg_match('/\d/', $tok)) {
+                // Le premier jeton "alphanumérique long avec chiffres" est
+                // considéré comme le matricule (ex : 24100330, ETU-2026-012).
+                $matricule = $tok;
+                continue;
+            }
+            $normalized = str_replace(',', '.', $tok);
+            if (is_numeric($normalized) && (float) $normalized >= 0 && (float) $normalized <= 100) {
+                $score = $normalized; // dernière valeur plausible retenue comme note
+            }
+        }
+
+        if ($matricule === null || $score === null) {
+            continue; // ligne d'en-tête, de titre ou non exploitable : ignorée silencieusement
+        }
+
+        $rows[] = array_merge(['line' => $lineNo], evaluateGradeCandidate($matricule, $score, $enrolled, $seen, $lookup));
+    }
+
+    return $rows;
+}
+
+
+
+/**
+ * Classement des promotions (= filière + groupe + année + semestre) d'un
+ * département par moyenne pondérée, du meilleur au moins bon. Ne compte
+ * que les notes soumises ou verrouillées (jamais les brouillons).
+ */
+function getPromotionGradeRanking(int $departmentId): array
+{
+    $stmt = getDB()->prepare(
+        "SELECT p.id AS promotion_id, p.name AS promotion_name, p.group_name, p.academic_year, p.semester,
+                f.name AS filiere_name,
+                SUM(sg.score * c.credits) / SUM(c.credits) AS mean,
+                SUM(sg.weighted_points) / SUM(c.credits) AS gpa,
+                COUNT(DISTINCT sg.student_id) AS student_count,
+                SUM(c.credits) AS total_credits
+         FROM student_grades sg
+         JOIN courses c ON c.id = sg.course_id
+         JOIN promotions p ON p.id = c.promotion_id
+         LEFT JOIN filieres f ON f.id = p.filiere_id
+         WHERE p.department_id = ? AND sg.status <> 'draft'
+         GROUP BY p.id
+         HAVING total_credits > 0
+         ORDER BY mean DESC"
+    );
+    $stmt->execute([$departmentId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Classement des étudiants d'un département par moyenne pondérée
+ * (toutes leurs notes soumises/verrouillées dans ce département).
+ * $order 'DESC' = meilleurs d'abord, 'ASC' = à accompagner en priorité.
+ */
+function getStudentGradeRanking(int $departmentId, string $order = 'DESC', int $limit = 10): array
+{
+    $order = $order === 'ASC' ? 'ASC' : 'DESC';
+    $stmt = getDB()->prepare(
+        "SELECT st.id AS student_id, st.full_name, st.matricule, p.name AS promotion_name, p.group_name,
+                SUM(sg.score * c.credits) / SUM(c.credits) AS mean,
+                SUM(sg.weighted_points) / SUM(c.credits) AS gpa,
+                COUNT(sg.id) AS graded_courses
+         FROM student_grades sg
+         JOIN courses c ON c.id = sg.course_id
+         JOIN promotions p ON p.id = c.promotion_id
+         JOIN students st ON st.id = sg.student_id
+         WHERE p.department_id = ? AND sg.status <> 'draft' AND st.status = 'active'
+         GROUP BY st.id
+         HAVING SUM(c.credits) > 0
+         ORDER BY mean $order
+         LIMIT ?"
+    );
+    $stmt->bindValue(1, $departmentId, PDO::PARAM_INT);
+    $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+
+/**
+ * Notifie un étudiant qu'une note lui a été ajoutée (soumise, donc
+ * désormais visible) ou corrigée. Jamais appelée pour un simple
+ * brouillon, invisible pour l'étudiant.
+ */
+function notifyStudentOfGrade(int $studentId, string $courseName, float $score, bool $isCorrection = false): void
+{
+    $message = $isCorrection
+        ? sprintf("Votre note pour le cours « %s » a été corrigée : %.2f/100.", $courseName, $score)
+        : sprintf("Une nouvelle note est disponible pour le cours « %s » : %.2f/100.", $courseName, $score);
+
+    $stmt = getDB()->prepare('INSERT INTO notifications (student_id, type, message, link) VALUES (?, ?, ?, ?)');
+    $stmt->execute([$studentId, 'grade', $message, BASE_URL . '/student/grades.php']);
+}
+
+/**
+ * Notifie le professeur affecté à un cours qu'une note qu'il a soumise
+ * vient d'être corrigée par le Chef de Département.
+ */
+function notifyProfessorOfGradeChange(int $professorUserId, string $matricule, string $courseName, float $oldScore, float $newScore): void
+{
+    $message = sprintf(
+        "Modification d'une note — Étudiant : %s — Cours : %s — Ancienne note : %s — Nouvelle note : %s — Modifié par : Chef de Département",
+        $matricule, $courseName, $oldScore, $newScore
+    );
+    notifyUser($professorUserId, 'grade_change', $message, BASE_URL . '/professor/notifications.php');
 }
 
